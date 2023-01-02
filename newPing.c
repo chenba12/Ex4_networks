@@ -11,25 +11,28 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 #define ICMP_HDRLEN 8
+#define SERVER_PORT 3000
+#define SERVER_IP "127.0.0.1"
 
 unsigned short calculate_checksum(unsigned short *paddress, int len);
+
+int clientTCPSocketSetup();
 
 int main(int argc, char **argv) {
     char *args[2];
     args[0] = "./watchdog";
     args[1] = NULL;
     int status;
-    char *ip = "127.0.0.1";
     static int iterator = 0;
     struct sockaddr_in dest_in;
     memset(&dest_in, 0, sizeof(struct sockaddr_in));
     dest_in.sin_family = AF_INET;
-    dest_in.sin_addr.s_addr = inet_addr(ip);
+    dest_in.sin_addr.s_addr = inet_addr(SERVER_IP);
 
     //create a raw socket
-    //TODO NO I/O BLOCKING
     int rawSocket = -1;
     if ((rawSocket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) == -1) {
         fprintf(stderr, "socket() failed with error: %d", errno);
@@ -41,14 +44,26 @@ int main(int argc, char **argv) {
         fprintf(stderr, "setsockopt() failed with error: %d", errno);
         exit(1);
     }
-    //TODO open tcp socket client
+    //set raw socket to non blocking i/o
+    int mode = fcntl(rawSocket, F_GETFL, 0);
+    if (mode == -1) {
+        printf("fcntl get failed with error code : %d\n", errno);
+        exit(-1);
+    }
 
-    //TODO FORK STUFF
+    mode = O_NONBLOCK;
+    if (fcntl(rawSocket, F_SETFL, mode) < 0) {
+        printf("fcntl set failed with error code : %d\n", errno);
+        exit(-1);
+    }
+
     int pid = fork();
+    wait(&status); // waiting for child to finish before exiting
     if (pid == 0) {
         printf("in child \n");
         execvp(args[0], args);
     } else {
+        printf("main\n");
         //TODO prepare socket
         struct timeval start, end;
         double elapsed;
@@ -56,7 +71,10 @@ int main(int argc, char **argv) {
         struct icmp *pointerIcmp = &icmphdr;
         char data[IP_MAXPACKET] = "This is the ping.\n";
         size_t dataLen = strlen(data) + 1;
-        printf("PING %s (%s) %zu data bytes \n", ip, ip, dataLen);
+        int clientTCPSocket = clientTCPSocketSetup();
+
+        printf("PING %s (%s) %zu data bytes \n", SERVER_IP, SERVER_IP, dataLen);
+
         while (1) {
             icmphdr.icmp_type = ICMP_ECHO;
             icmphdr.icmp_code = 0;
@@ -71,8 +89,8 @@ int main(int argc, char **argv) {
             // Calculate the ICMP header checksum
             gettimeofday(&start, NULL);
             // Send the packet using sendto() for sending datagrams.
-            int bytes_sent = sendto(rawSocket, packet, ICMP_HDRLEN + dataLen, 0
-                                    , (struct sockaddr *) &dest_in,sizeof(dest_in));
+            int bytes_sent = sendto(rawSocket, packet, ICMP_HDRLEN + dataLen, 0, (struct sockaddr *) &dest_in,
+                                    sizeof(dest_in));
             if (bytes_sent == -1) {
                 fprintf(stderr, "sendto() failed with error: %d", errno);
                 return -1;
@@ -84,6 +102,7 @@ int main(int argc, char **argv) {
             while ((bytes_received = recvfrom(rawSocket, packet, sizeof(packet), 0, (struct sockaddr *) &dest_in,
                                               &len))) {
                 if (bytes_received <= 0) {
+                    //TODO CHECK WITH WATCHDOG
                     fprintf(stderr, "recvfrom() failed with error: %d", errno);
                 }
                 if (bytes_received > 0) {
@@ -95,12 +114,11 @@ int main(int argc, char **argv) {
             gettimeofday(&end, NULL);
             float milliseconds = (end.tv_sec - start.tv_sec) * 1000.0f + (end.tv_usec - start.tv_usec) / 1000.0f;
             printf("%d bytes from %s icmp_seq=%d ttl=%d time=%.2f ms\n",
-                   bytes_sent, ip, iterator, ttl, (milliseconds));
+                   bytes_sent, SERVER_IP, iterator, ttl, (milliseconds));
             iterator++;
             sleep(1);
         }
         //TODO REACH HERE
-        wait(&status); // waiting for child to finish before exiting
         printf("child exit status is: %d", status);
         close(rawSocket);
         return 0;
@@ -125,4 +143,29 @@ unsigned short calculate_checksum(unsigned short *paddress, int len) {
     sum += (sum >> 16);
     answer = ~sum;
     return answer;
+}
+
+int clientTCPSocketSetup() {
+    // Opening a new socket connection
+    int senderSocket = 0;
+    if ((senderSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        printf("Failed to open a TCP connection : %d", errno);
+        exit(-1);
+    }
+    struct sockaddr_in serverAddress;
+    memset(&serverAddress, 0, sizeof(serverAddress));
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_port = htons(SERVER_PORT);
+    int binaryAddress = inet_pton(AF_INET, (const char *) SERVER_IP, &serverAddress.sin_addr);
+    if (binaryAddress <= 0) {
+        printf("Failed to convert from text to binary : %d", errno);
+    }
+    // Connecting to the receiver's socket
+    int connection = connect(senderSocket, (struct sockaddr *) &serverAddress, sizeof(serverAddress));
+    if (connection == -1) {
+        printf("Connection error : %d\n", errno);
+        close(senderSocket);
+        exit(-1);
+    }
+    return senderSocket;
 }
