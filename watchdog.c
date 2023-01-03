@@ -17,8 +17,6 @@ int watchdogStuff(int clientSocket);
 
 int receive(int sock);
 
-int sendMessage(int clientSocket, char *message);
-
 
 int main() {
     int serverSocket = serverSocketSetup();
@@ -83,20 +81,18 @@ int serverSocketSetup() {
 }
 
 int watchdogStuff(int clientSocket) {
-    int timer = 9;
+    int timer = 0;
     while (timer < 10) {
         sleep(1);
         timer++;
         int bytesReceived = receive(clientSocket);
         if (timer == 10) {
-            printf("timer %d\n", timer);
             break;
         }
         if (bytesReceived > 0) {
             timer = 0;
         }
     }
-    //TODO send to newPing
     return 1;
 }
 

@@ -11,7 +11,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <sys/wait.h>
-#include <fcntl.h>
 
 #define ICMP_HDRLEN 8
 #define SERVER_PORT 3000

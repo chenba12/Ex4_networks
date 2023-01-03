@@ -11,7 +11,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-#define IP4_HDRLEN 20
 #define ICMP_HDRLEN 8
 
 unsigned short calculate_checksum(unsigned short *paddress, int len);
