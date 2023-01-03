@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
     dest_in.sin_addr.s_addr = inet_addr(destIP);
 
     // Opening a new socket connection
-    int clientTCPSocket = clientTCPSocketSetup(destIP);
+    int clientTCPSocket = clientTCPSocketSetup(SERVER_IP);
     if (clientTCPSocket == -1) {
         printf("error\n");
     }
