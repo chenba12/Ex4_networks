@@ -22,6 +22,12 @@ int clientTCPSocketSetup(char *destIP);
 
 int receive(int clientSocket);
 
+void
+pingFlow(int iterator, const char *destIP, int rawSocket, int ttl, struct sockaddr_in *dest_in, int clientTCPSocket,
+         struct timeval *start, struct timeval *end, struct icmp *icmphdr, const char *data, size_t dataLen);
+
+void createRawSocket(int *rawSocket, int *ttl);
+
 int main(int argc, char **argv) {
 
     if (argc != 2) {
@@ -34,17 +40,9 @@ int main(int argc, char **argv) {
     args[0] = "./watchdog";
     args[1] = NULL;
     //create a raw socket
-    int rawSocket = -1;
-    if ((rawSocket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) == -1) {
-        fprintf(stderr, "socket() failed with error: %d", errno);
-        fprintf(stderr, "To create a raw socket, the process needs to be run by Admin/root user.\n\n");
-        return -1;
-    }
-    int ttl = 64;
-    if (setsockopt(rawSocket, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) < 0) {
-        fprintf(stderr, "setsockopt() failed with error: %d", errno);
-        exit(1);
-    }
+    int rawSocket;
+    int ttl;
+    createRawSocket(&rawSocket, &ttl);
     int pid = fork();
     if (pid == 0) {
         printf("in child \n");
@@ -61,8 +59,10 @@ int main(int argc, char **argv) {
     int clientTCPSocket = clientTCPSocketSetup(SERVER_IP);
     if (clientTCPSocket == -1) {
         printf("error\n");
+        close(clientTCPSocket);
+        close(rawSocket);
+        exit(-1);
     }
-
     // Connecting to the receiver's socket
     struct timeval start, end;
     double elapsed;
@@ -73,58 +73,7 @@ int main(int argc, char **argv) {
 
     printf("PING %s (%s) %zu data bytes \n", destIP, destIP, dataLen);
     while (1) {
-        icmphdr.icmp_type = ICMP_ECHO;
-        icmphdr.icmp_code = 0;
-        icmphdr.icmp_id = 18;
-        icmphdr.icmp_seq = 0;
-        icmphdr.icmp_cksum = 0;
-        char packet[IP_MAXPACKET];
-        memcpy((packet), &icmphdr, ICMP_HDRLEN);
-        memcpy(packet + ICMP_HDRLEN, data, dataLen);
-        icmphdr.icmp_cksum = calculate_checksum((unsigned short *) (packet), ICMP_HDRLEN + dataLen);
-        memcpy((packet), &icmphdr, ICMP_HDRLEN);
-        // Calculate the ICMP header checksum
-        gettimeofday(&start, NULL);
-        // Send the packet using sendto() for sending datagrams.
-        int bytes_sent = sendto(rawSocket, packet, ICMP_HDRLEN + dataLen, 0, (struct sockaddr *) &dest_in,
-                                sizeof(dest_in));
-        if (bytes_sent == -1) {
-            fprintf(stderr, "sendto() failed with error: %d", errno);
-            return -1;
-        }
-
-        char signal[1] = {1};
-        int signalSend = send(clientTCPSocket, signal, sizeof(signal), 0);
-        if (signalSend == -1) {
-            printf("Send() failed with error code : %d\n", errno);
-            close(clientTCPSocket);
-            return -1;
-        } else if (signalSend == 0) {
-            printf("Peer has closed the TCP connection prior to send().\n");
-            return -1;
-        }
-
-        // Get the ping response
-        bzero(packet, IP_MAXPACKET);
-        socklen_t len = sizeof(dest_in);
-        ssize_t bytes_received;
-        while ((bytes_received = recvfrom(rawSocket, packet, sizeof(packet), 0, (struct sockaddr *) &dest_in, &len))) {
-            if (bytes_received <= 0) {
-                fprintf(stderr, "recvfrom() failed with error: %d", errno);
-            }
-            if (bytes_received > 0) {
-                struct iphdr *iphdr = (struct iphdr *) packet;
-                struct icmphdr *icmphdr = (struct icmphdr *) (packet + (iphdr->ihl * 4));
-                break;
-            }
-        }
-
-        gettimeofday(&end, NULL);
-        float milliseconds = (end.tv_sec - start.tv_sec) * 1000.0f + (end.tv_usec - start.tv_usec) / 1000.0f;
-        printf("%d bytes from %s icmp_seq=%d ttl=%d time=%.2f ms\n",
-               bytes_sent, destIP, iterator, ttl, (milliseconds));
-        iterator++;
-        sleep(1);
+        pingFlow(iterator, destIP, rawSocket, ttl, &dest_in, clientTCPSocket, &start, &end, &icmphdr, data, dataLen);
         int status;
         if (waitpid(pid, &status, WNOHANG) != 0) {
             printf("Child process ended with exit status %d.\n", WEXITSTATUS(status));
@@ -134,6 +83,87 @@ int main(int argc, char **argv) {
         }
     }
     return 0;
+}
+
+void createRawSocket(int *rawSocket, int *ttl) {
+    (*rawSocket) = -1;
+    (*ttl) = 64;
+    if (((*rawSocket) = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) == -1) {
+        fprintf(stderr, "socket() failed with error: %d", errno);
+        fprintf(stderr, "To create a raw socket, the process needs to be run by Admin/root user.\n\n");
+        close((*rawSocket));
+        exit(-1);
+    }
+    if (setsockopt((*rawSocket), IPPROTO_IP, IP_TTL, ttl, sizeof(*ttl)) < 0) {
+        fprintf(stderr, "setsockopt() failed with error: %d", errno);
+        close((*rawSocket));
+        exit(-1);
+    }
+}
+
+void
+pingFlow(int iterator, const char *destIP, int rawSocket, int ttl, struct sockaddr_in *dest_in, int clientTCPSocket,
+         struct timeval *start, struct timeval *end, struct icmp *icmphdr, const char *data, size_t dataLen) {
+    (*icmphdr).icmp_type = ICMP_ECHO;
+    (*icmphdr).icmp_code = 0;
+    (*icmphdr).icmp_id = 18;
+    (*icmphdr).icmp_seq = 0;
+    (*icmphdr).icmp_cksum = 0;
+    char packet[IP_MAXPACKET];
+    memcpy((packet), icmphdr, ICMP_HDRLEN);
+    memcpy(packet + ICMP_HDRLEN, data, dataLen);
+    (*icmphdr).icmp_cksum = calculate_checksum((unsigned short *) (packet), ICMP_HDRLEN + dataLen);
+    memcpy((packet), icmphdr, ICMP_HDRLEN);
+    // Calculate the ICMP header checksum
+    gettimeofday(start, NULL);
+    // Send the packet using sendto() for sending datagrams.
+    int bytes_sent = sendto(rawSocket, packet, ICMP_HDRLEN + dataLen, 0, (struct sockaddr *) dest_in,
+                            sizeof(*dest_in));
+    if (bytes_sent == -1) {
+        fprintf(stderr, "sendto() failed with error: %d", errno);
+        close(clientTCPSocket);
+        close(rawSocket);
+        exit(-1);
+    }
+
+    char signal[1] = {1};
+    int signalSend = send(clientTCPSocket, signal, sizeof(signal), 0);
+    if (signalSend == -1) {
+        printf("Send() failed with error code : %d\n", errno);
+        close(clientTCPSocket);
+        close(rawSocket);
+        exit(-1);
+    } else if (signalSend == 0) {
+        printf("Peer has closed the TCP connection prior to send().\n");
+        close(clientTCPSocket);
+        close(rawSocket);
+        exit(-1);
+    }
+
+    // Get the ping response
+    bzero(packet, IP_MAXPACKET);
+    socklen_t len = sizeof(*dest_in);
+    ssize_t bytes_received;
+    while ((bytes_received = recvfrom(rawSocket, packet, sizeof(packet), 0, (struct sockaddr *) dest_in, &len))) {
+        if (bytes_received <= 0) {
+            fprintf(stderr, "recvfrom() failed with error: %d", errno);
+            close(clientTCPSocket);
+            close(rawSocket);
+            exit(-1);
+        }
+        if (bytes_received > 0) {
+            struct iphdr *iphdr = (struct iphdr *) packet;
+            struct icmphdr *icmphdr = (struct icmphdr *) (packet + (iphdr->ihl * 4));
+            break;
+        }
+    }
+
+    gettimeofday(end, NULL);
+    float milliseconds = ((*end).tv_sec - (*start).tv_sec) * 1000.0f + ((*end).tv_usec - (*start).tv_usec) / 1000.0f;
+    printf("%d bytes from %s icmp_seq=%d ttl=%d time=%.2f ms\n",
+           bytes_sent, destIP, iterator, ttl, (milliseconds));
+    iterator++;
+    sleep(1);
 }
 
 unsigned short calculate_checksum(unsigned short *paddress, int len) {

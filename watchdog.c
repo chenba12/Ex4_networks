@@ -30,18 +30,18 @@ int main() {
         int clientSocket = accept(serverSocket, (struct sockaddr *) &clientAddress, &clientAddressLen);
         if (clientSocket == -1) {
             printf("accept failed with error code : %d\n", errno);
+            close(clientSocket);
             close(serverSocket);
-            return -1;
+            exit(-1);
         }
 
         printf("A new client connection accepted\n");
         watchdogStuff(clientSocket);
         close(clientSocket);
         close(serverSocket);
-        exit(-1);
+        break;
     }
-    close(serverSocket);
-    return 0;
+    exit(-1);
 }
 
 int serverSocketSetup() {
@@ -49,14 +49,16 @@ int serverSocketSetup() {
     //Opening a new TCP socket
     if ((serverSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         printf("Failed to open a TCP connection : %d", errno);
-        return -1;
+        close(serverSocket);
+        exit(-1);
     }
     //Enabling reuse of the port
     int enableReuse = 1;
     int ret = setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &enableReuse, sizeof(int));
     if (ret < 0) {
         printf("setSockopt() reuse failed with error code : %d", errno);
-        return -1;
+        close(serverSocket);
+        exit(-1);
     }
 
     struct sockaddr_in serverAddress;
@@ -69,13 +71,14 @@ int serverSocketSetup() {
     if (bindResult == -1) {
         printf("Bind failed with error code : %d\n", errno);
         close(serverSocket);
-        return -1;
+        exit(-1);
     }
     //Preparing to accept new in coming requests
     int listenResult = listen(serverSocket, 10);
     if (listenResult == -1) {
         printf("Bind failed with error code : %d\n", errno);
-        return -1;
+        close(serverSocket);
+        exit(-1);
     }
     return serverSocket;
 }
