@@ -93,7 +93,7 @@ int watchdogStuff(int clientSocket) {
             timer = 0;
         }
     }
-    return 1;
+    return -1;
 }
 
 int receive(int clientSocket) {

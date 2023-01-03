@@ -30,7 +30,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "To create a raw socket, the process needs to be run by Admin/root user.\n\n");
         return -1;
     }
-    int ttl = 115;
+    int ttl = 64;
     if (setsockopt(sock, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) < 0) {
         fprintf(stderr, "setsockopt() failed with error: %d", errno);
         exit(1);
