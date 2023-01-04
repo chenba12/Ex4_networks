@@ -20,7 +20,7 @@
 //functions signatures
 unsigned short calculate_checksum(unsigned short *paddress, int len);
 
-int clientTCPSocketSetup(char *destIP);
+int clientTCPSocketSetup();
 
 void
 pingFlow(const char *destIP, int rawSocket, int ttl, struct sockaddr_in *dest_in, int clientTCPSocket,
@@ -29,7 +29,6 @@ pingFlow(const char *destIP, int rawSocket, int ttl, struct sockaddr_in *dest_in
 void createRawSocket(int *rawSocket, int *ttl);
 
 int main(int argc, char **argv) {
-
     if (argc != 2) {
         printf("Destination IP parameter is undecleared%d\n", errno);
         exit(-1);
@@ -43,7 +42,7 @@ int main(int argc, char **argv) {
     int rawSocket;
     int ttl;
     createRawSocket(&rawSocket, &ttl);
-    //start a new process and executre ./watchdog1
+    //start a new process and execute ./watchdog1
     int pid = fork();
     if (pid == 0) {
 
@@ -58,7 +57,7 @@ int main(int argc, char **argv) {
     dest_in.sin_addr.s_addr = inet_addr(destIP);
 
     // Opening a new socket connection
-    int clientTCPSocket = clientTCPSocketSetup(SERVER_IP);
+    int clientTCPSocket = clientTCPSocketSetup();
     if (clientTCPSocket == -1) {
         printf("error\n");
         close(clientTCPSocket);
@@ -143,7 +142,7 @@ pingFlow(const char *destIP, int rawSocket, int ttl, struct sockaddr_in *dest_in
     while ((bytes_received = recvfrom(rawSocket, packet, sizeof(packet), MSG_DONTWAIT, (struct sockaddr *) dest_in,
                                       &len))) {
         if (waitpid(0, &status, WNOHANG) != 0) {
-            printf("Watchdog process ended with exit status %d.\n closing sockets...\n", WEXITSTATUS(status));
+            printf("Watchdog process ended with exit status %d.\nclosing sockets...\n", WEXITSTATUS(status));
             close(rawSocket);
             close(clientTCPSocket);
             exit(-1);
@@ -183,7 +182,7 @@ unsigned short calculate_checksum(unsigned short *paddress, int len) {
 }
 
 //create a new tcp socket and connect to the watchdog's tcp socket
-int clientTCPSocketSetup(char *destIP) {
+int clientTCPSocketSetup() {
     int pingSocket;
     //creating a new tcp socket
     if ((pingSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
@@ -194,7 +193,7 @@ int clientTCPSocketSetup(char *destIP) {
     memset(&serverAddress, 0, sizeof(serverAddress));
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_port = htons(SERVER_PORT);
-    int binaryAddress = inet_pton(AF_INET, (const char *) destIP, &serverAddress.sin_addr);
+    int binaryAddress = inet_pton(AF_INET, (const char *) SERVER_IP, &serverAddress.sin_addr);
     if (binaryAddress <= 0) {
         printf("Failed to convert from text to binary : %d", errno);
     }

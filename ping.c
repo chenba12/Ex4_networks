@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
         icmphdr.icmp_type = ICMP_ECHO;
         icmphdr.icmp_code = 0;
         icmphdr.icmp_id = 18;
-        icmphdr.icmp_seq = 0;
+        icmphdr.icmp_seq = iterator;
         icmphdr.icmp_cksum = 0;
         char packet[IP_MAXPACKET];
         memcpy((packet), &icmphdr, ICMP_HDRLEN);
@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
         gettimeofday(&end, NULL);
         float milliseconds = (end.tv_sec - start.tv_sec) * 1000.0f + (end.tv_usec - start.tv_usec) / 1000.0f;
         printf("%d bytes from %s icmp_seq=%d ttl=%d time=%.2f ms\n",
-               bytes_sent, ip, iterator, ttl, (milliseconds));
+               bytes_sent, ip, icmphdr.icmp_seq, ttl, (milliseconds));
         iterator++;
         sleep(1);
     }
