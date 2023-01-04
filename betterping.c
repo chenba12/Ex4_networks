@@ -12,18 +12,18 @@
 #include <stdlib.h>
 #include <sys/wait.h>
 
+//constants
 #define ICMP_HDRLEN 8
 #define SERVER_PORT 3000
 #define SERVER_IP "127.0.0.1"
 
+//functions signatures
 unsigned short calculate_checksum(unsigned short *paddress, int len);
 
 int clientTCPSocketSetup(char *destIP);
 
-int receive(int clientSocket);
-
 void
-pingFlow(int iterator, const char *destIP, int rawSocket, int ttl, struct sockaddr_in *dest_in, int clientTCPSocket,
+pingFlow(const char *destIP, int rawSocket, int ttl, struct sockaddr_in *dest_in, int clientTCPSocket,
          struct timeval *start, struct timeval *end, struct icmp *icmphdr, const char *data, size_t dataLen);
 
 void createRawSocket(int *rawSocket, int *ttl);
@@ -32,9 +32,9 @@ int main(int argc, char **argv) {
 
     if (argc != 2) {
         printf("Destination IP parameter is undecleared%d\n", errno);
-        exit(1);
+        exit(-1);
     }
-    static int iterator = 0;
+
     char *args[2];
     char *destIP = argv[1];
     args[0] = "./watchdog";
@@ -43,13 +43,15 @@ int main(int argc, char **argv) {
     int rawSocket;
     int ttl;
     createRawSocket(&rawSocket, &ttl);
+    //start a new process and executre ./watchdog1
     int pid = fork();
     if (pid == 0) {
-        printf("in child \n");
+
+        printf("in watchdog process \n");
         execvp(args[0], args);
     }
     sleep(1);
-    printf("main\n");
+    printf("better ping process\n");
     struct sockaddr_in dest_in;
     memset(&dest_in, 0, sizeof(struct sockaddr_in));
     dest_in.sin_family = AF_INET;
@@ -63,28 +65,25 @@ int main(int argc, char **argv) {
         close(rawSocket);
         exit(-1);
     }
-    // Connecting to the receiver's socket
+
     struct timeval start, end;
-    double elapsed;
     struct icmp icmphdr; // ICMP-header
     struct icmp *pointerIcmp = &icmphdr;
-    char data[IP_MAXPACKET] = "This is the ping.\n";
+    char data[IP_MAXPACKET] = "Sending a ping message\n";
     size_t dataLen = strlen(data) + 1;
-
+    icmphdr.icmp_seq = 0;
     printf("PING %s (%s) %zu data bytes \n", destIP, destIP, dataLen);
     while (1) {
-        pingFlow(iterator, destIP, rawSocket, ttl, &dest_in, clientTCPSocket, &start, &end, &icmphdr, data, dataLen);
-        int status;
-        if (waitpid(pid, &status, WNOHANG) != 0) {
-            printf("Child process ended with exit status %d.\n", WEXITSTATUS(status));
-            close(rawSocket);
-            close(clientTCPSocket);
-            break;
-        }
+        icmphdr.icmp_cksum = 0;
+        icmphdr.icmp_type = ICMP_ECHO;
+        icmphdr.icmp_code = 0;
+        icmphdr.icmp_id = 18;
+        pingFlow(destIP, rawSocket, ttl, &dest_in, clientTCPSocket, &start, &end, &icmphdr, data, dataLen);
     }
     return 0;
 }
 
+//create a raw socket and set the ttl to 64
 void createRawSocket(int *rawSocket, int *ttl) {
     (*rawSocket) = -1;
     (*ttl) = 64;
@@ -102,13 +101,8 @@ void createRawSocket(int *rawSocket, int *ttl) {
 }
 
 void
-pingFlow(int iterator, const char *destIP, int rawSocket, int ttl, struct sockaddr_in *dest_in, int clientTCPSocket,
+pingFlow(const char *destIP, int rawSocket, int ttl, struct sockaddr_in *dest_in, int clientTCPSocket,
          struct timeval *start, struct timeval *end, struct icmp *icmphdr, const char *data, size_t dataLen) {
-    (*icmphdr).icmp_type = ICMP_ECHO;
-    (*icmphdr).icmp_code = 0;
-    (*icmphdr).icmp_id = 18;
-    (*icmphdr).icmp_seq = 0;
-    (*icmphdr).icmp_cksum = 0;
     char packet[IP_MAXPACKET];
     memcpy((packet), icmphdr, ICMP_HDRLEN);
     memcpy(packet + ICMP_HDRLEN, data, dataLen);
@@ -116,7 +110,7 @@ pingFlow(int iterator, const char *destIP, int rawSocket, int ttl, struct sockad
     memcpy((packet), icmphdr, ICMP_HDRLEN);
     // Calculate the ICMP header checksum
     gettimeofday(start, NULL);
-    // Send the packet using sendto() for sending datagrams.
+    // Send the packet using sendto() for sending using rawsocket to the given ip.
     int bytes_sent = sendto(rawSocket, packet, ICMP_HDRLEN + dataLen, 0, (struct sockaddr *) dest_in,
                             sizeof(*dest_in));
     if (bytes_sent == -1) {
@@ -126,8 +120,9 @@ pingFlow(int iterator, const char *destIP, int rawSocket, int ttl, struct sockad
         exit(-1);
     }
 
-    char signal[1] = {1};
-    int signalSend = send(clientTCPSocket, signal, sizeof(signal), 0);
+    //send a message to the watchdog in order to let it know everything works correctly
+    char *ping = "ping";
+    int signalSend = send(clientTCPSocket, ping, strlen(ping), 0);
     if (signalSend == -1) {
         printf("Send() failed with error code : %d\n", errno);
         close(clientTCPSocket);
@@ -140,15 +135,17 @@ pingFlow(int iterator, const char *destIP, int rawSocket, int ttl, struct sockad
         exit(-1);
     }
 
-    // Get the ping response
     bzero(packet, IP_MAXPACKET);
     socklen_t len = sizeof(*dest_in);
     ssize_t bytes_received;
-    while ((bytes_received = recvfrom(rawSocket, packet, sizeof(packet), 0, (struct sockaddr *) dest_in, &len))) {
-        if (bytes_received <= 0) {
-            fprintf(stderr, "recvfrom() failed with error: %d", errno);
-            close(clientTCPSocket);
+    int status = 0;
+    // Get the ping response
+    while ((bytes_received = recvfrom(rawSocket, packet, sizeof(packet), MSG_DONTWAIT, (struct sockaddr *) dest_in,
+                                      &len))) {
+        if (waitpid(0, &status, WNOHANG) != 0) {
+            printf("Watchdog process ended with exit status %d.\n closing sockets...\n", WEXITSTATUS(status));
             close(rawSocket);
+            close(clientTCPSocket);
             exit(-1);
         }
         if (bytes_received > 0) {
@@ -157,15 +154,15 @@ pingFlow(int iterator, const char *destIP, int rawSocket, int ttl, struct sockad
             break;
         }
     }
-
     gettimeofday(end, NULL);
     float milliseconds = ((*end).tv_sec - (*start).tv_sec) * 1000.0f + ((*end).tv_usec - (*start).tv_usec) / 1000.0f;
+    //print the info about the ping and the time it took in milliseconds
     printf("%d bytes from %s icmp_seq=%d ttl=%d time=%.2f ms\n",
-           bytes_sent, destIP, iterator, ttl, (milliseconds));
-    iterator++;
+           bytes_sent, destIP, ++icmphdr->icmp_seq, ttl, (milliseconds));
     sleep(1);
 }
 
+//checksum function to add to the icmp header
 unsigned short calculate_checksum(unsigned short *paddress, int len) {
     int nleft = len;
     int sum = 0;
@@ -185,9 +182,11 @@ unsigned short calculate_checksum(unsigned short *paddress, int len) {
     return answer;
 }
 
+//create a new tcp socket and connect to the watchdog's tcp socket
 int clientTCPSocketSetup(char *destIP) {
-    int senderSocket = 0;
-    if ((senderSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+    int pingSocket;
+    //creating a new tcp socket
+    if ((pingSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         printf("Failed to open a TCP connection : %d", errno);
         exit(-1);
     }
@@ -199,24 +198,12 @@ int clientTCPSocketSetup(char *destIP) {
     if (binaryAddress <= 0) {
         printf("Failed to convert from text to binary : %d", errno);
     }
-    int connection = connect(senderSocket, (struct sockaddr *) &serverAddress, sizeof(serverAddress));
+    // Connecting to the watchdog's socket
+    int connection = connect(pingSocket, (struct sockaddr *) &serverAddress, sizeof(serverAddress));
     if (connection == -1) {
         printf("Connection error : %d\n", errno);
-        close(senderSocket);
+        close(pingSocket);
         exit(-1);
     }
-    return senderSocket;
-}
-
-int receive(int clientSocket) {
-    char timeoutMessage[8];
-    int bytesReceived = recv(clientSocket, timeoutMessage, sizeof(timeoutMessage), 0);
-    if (bytesReceived == -1) {
-        printf("recv() failed with error code : %d\n", errno);
-    }
-    printf("this is signal %s", timeoutMessage);
-    if (strcmp(timeoutMessage, "timeout") == 0) {
-        printf("yay");
-    }
-    return bytesReceived;
+    return pingSocket;
 }

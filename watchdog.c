@@ -11,53 +11,56 @@
 #define SERVER_PORT 3000
 #define SERVER_IP "127.0.0.1"
 
-int serverSocketSetup();
+//functions signatures
+int watchdogSocketSetup();
 
-int watchdogStuff(int clientSocket);
-
-int receive(int sock);
+int watchdogTimer(int pingSocket);
 
 
 int main() {
-    int serverSocket = serverSocketSetup();
+    //create a new tcp socket for the watchdog
+    int watchdogSocket = watchdogSocketSetup();
     printf("Waiting for incoming TCP-connections...\n");
     struct sockaddr_in clientAddress;  //
     socklen_t clientAddressLen = sizeof(clientAddress);
     memset(&clientAddress, 0, sizeof(clientAddress));
     clientAddressLen = sizeof(clientAddress);
-    //Accepting a new client connection
+    //watchdog is ready to get new tcp messages
     while (1) {
-        int clientSocket = accept(serverSocket, (struct sockaddr *) &clientAddress, &clientAddressLen);
-        if (clientSocket == -1) {
+        //Accepting a new client connection
+        int pingSocket = accept(watchdogSocket, (struct sockaddr *) &clientAddress, &clientAddressLen);
+        if (pingSocket == -1) {
             printf("accept failed with error code : %d\n", errno);
-            close(clientSocket);
-            close(serverSocket);
+            close(pingSocket);
+            close(watchdogSocket);
             exit(-1);
         }
-
         printf("A new client connection accepted\n");
-        watchdogStuff(clientSocket);
-        close(clientSocket);
-        close(serverSocket);
-        break;
+        //setup the timer and receive messages
+        watchdogTimer(pingSocket);
+        //if the timer passed 10 seconds without receiving anything it will close the sockets and let the better ping process
+        //that the program ended
+        close(pingSocket);
+        close(watchdogSocket);
+        exit(-1);
     }
-    exit(-1);
+    return 0;
 }
 
-int serverSocketSetup() {
-    int serverSocket;
+int watchdogSocketSetup() {
+    int watchdogSocket;
     //Opening a new TCP socket
-    if ((serverSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+    if ((watchdogSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         printf("Failed to open a TCP connection : %d", errno);
-        close(serverSocket);
+        close(watchdogSocket);
         exit(-1);
     }
     //Enabling reuse of the port
     int enableReuse = 1;
-    int ret = setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &enableReuse, sizeof(int));
+    int ret = setsockopt(watchdogSocket, SOL_SOCKET, SO_REUSEADDR, &enableReuse, sizeof(int));
     if (ret < 0) {
         printf("setSockopt() reuse failed with error code : %d", errno);
-        close(serverSocket);
+        close(watchdogSocket);
         exit(-1);
     }
 
@@ -67,43 +70,41 @@ int serverSocketSetup() {
     serverAddress.sin_addr.s_addr = inet_addr(SERVER_IP);
     serverAddress.sin_port = htons(SERVER_PORT);
     //bind() associates the socket with its local address 127.0.0.1
-    int bindResult = bind(serverSocket, (struct sockaddr *) &serverAddress, sizeof(serverAddress));
+    int bindResult = bind(watchdogSocket, (struct sockaddr *) &serverAddress, sizeof(serverAddress));
     if (bindResult == -1) {
         printf("Bind failed with error code : %d\n", errno);
-        close(serverSocket);
+        close(watchdogSocket);
         exit(-1);
     }
     //Preparing to accept new in coming requests
-    int listenResult = listen(serverSocket, 10);
+    int listenResult = listen(watchdogSocket, 10);
     if (listenResult == -1) {
         printf("Bind failed with error code : %d\n", errno);
-        close(serverSocket);
+        close(watchdogSocket);
         exit(-1);
     }
-    return serverSocket;
+    return watchdogSocket;
 }
 
-int watchdogStuff(int clientSocket) {
+//receiving a message every second if nothing has been received break the loop and return
+int watchdogTimer(int pingSocket) {
     int timer = 0;
+    char messageReceived[5];
     while (timer < 10) {
         sleep(1);
+        int bytes;
         timer++;
-        int bytesReceived = receive(clientSocket);
         if (timer == 10) {
             break;
         }
-        if (bytesReceived > 0) {
-            timer = 0;
+        while ((bytes = recv(pingSocket, messageReceived, 5, MSG_DONTWAIT))) {
+            if (bytes > 0) {
+                timer = 0;
+            } else {
+                break;
+            }
         }
     }
     return -1;
 }
 
-int receive(int clientSocket) {
-    char signal[1] = {0};
-    int bytesReceived = recv(clientSocket, signal, sizeof(signal), 0);
-    if (bytesReceived == -1) {
-        printf("recv() failed with error code : %d\n", errno);
-    }
-    return bytesReceived;
-}
