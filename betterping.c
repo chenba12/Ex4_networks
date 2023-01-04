@@ -142,7 +142,7 @@ pingFlow(const char *destIP, int rawSocket, int ttl, struct sockaddr_in *dest_in
     while ((bytes_received = recvfrom(rawSocket, packet, sizeof(packet), MSG_DONTWAIT, (struct sockaddr *) dest_in,
                                       &len))) {
         if (waitpid(0, &status, WNOHANG) != 0) {
-            printf("Watchdog process ended with exit status %d.\nclosing sockets...\n", WEXITSTATUS(status));
+            printf("server <%s> cannot be reached\n",destIP);
             close(rawSocket);
             close(clientTCPSocket);
             exit(-1);
